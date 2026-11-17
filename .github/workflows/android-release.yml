@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -23,31 +23,48 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
-          
-
       - name: Setup Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
+      - name: Prepare Android SDK
+        shell: bash
+        run: |
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager tidak ditemukan"
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          "$SDKMANAGER" --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
       - name: Extract GEYGO ZIP
+        shell: bash
         run: |
           unzip -q GEYGO_PROJECT_REPAIRED_V2.zip -d source
-          test -f source/GEYGO_PROJECT_AndroidStudio_FIXED/settings.gradle.kts
+          PROJECT_DIR=$(dirname "$(find source -name settings.gradle.kts -print -quit)")
+          test -f "$PROJECT_DIR/app/build.gradle.kts"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Build Release APK
-        working-directory: source/GEYGO_PROJECT_AndroidStudio_FIXED
-        run: gradle --no-daemon :app:assembleRelease --stacktrace
+        run: |
+          gradle --no-daemon -p "$PROJECT_DIR" :app:assembleRelease --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: GEYGO-release-apk
-          path: source/GEYGO_PROJECT_AndroidStudio_FIXED/app/build/outputs/apk/release/*.apk
+          path: source/**/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           
